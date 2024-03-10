@@ -1,0 +1,8 @@
+Flask
+requests
+gunicorn
+google-crc32c
+google-cloud-secret-manager
+google-cloud-pubsub
+google-auth
+google-api-python-client
