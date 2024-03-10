@@ -1,2 +1,3 @@
 project_id = "prj-something-or-other-abc"
-service_name = "ai-slackbot"
+service_name = "cloudrun-domain-map"
+domain_name = "somewhere.someplace.com"

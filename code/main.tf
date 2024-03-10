@@ -118,3 +118,14 @@ resource "google_cloud_run_v2_service_iam_member" "noauth" {
 }
 
 
+resource "google_cloud_run_domain_mapping" "default" {
+  name     = var.domain_name
+  location = google_cloud_run_v2_service.default.location
+  project  = local.project_id
+  metadata {
+    namespace = local.project_id
+  }
+  spec {
+    route_name = google_cloud_run_v2_service.default.name
+  }
+}
