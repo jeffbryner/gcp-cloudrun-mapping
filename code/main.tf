@@ -76,143 +76,45 @@ resource "google_project_organization_policy" "services_policy" {
   }
 }
 
-resource "google_cloud_run_service" "default" {
-  name                       = local.service_name
-  location                   = local.location
-  project                    = local.project_id
-  autogenerate_revision_name = true
+resource "google_cloud_run_v2_service" "default" {
+  name     = local.service_name
+  location = local.location
+  project  = local.project_id
+  ingress  = "INGRESS_TRAFFIC_ALL"
 
+  # template {
+  #   spec {
+  #     service_account_name = google_service_account.cloudrun_service_identity.email
+  #     containers {
+  #       image = "${local.location}-docker.pkg.dev/${local.project_id}/${local.gar_repo_name}/${local.service_name}"
+  #       env {
+  #         name  = "PROJECT_ID"
+  #         value = local.project_id
+  #       }
+  #     }
+  #   }
+  # }
   template {
-    spec {
-      service_account_name = google_service_account.cloudrun_service_identity.email
-      containers {
-        image = "${local.location}-docker.pkg.dev/${local.project_id}/${local.gar_repo_name}/${local.service_name}"
-        env {
-          name  = "PROJECT_ID"
-          value = local.project_id
-        }
+
+    containers {
+      image = "${local.location}-docker.pkg.dev/${local.project_id}/${local.gar_repo_name}/${local.service_name}"
+      env {
+        name  = "PROJECT_ID"
+        value = local.project_id
       }
+
     }
+    service_account = google_service_account.cloudrun_service_identity.email
   }
 
 }
 
-data "google_iam_policy" "noauth" {
-  binding {
-    role = "roles/run.invoker"
-    members = [
-      "allUsers",
-    ]
-  }
-}
-
-resource "google_cloud_run_service_iam_policy" "noauth" {
-  location = google_cloud_run_service.default.location
+resource "google_cloud_run_v2_service_iam_member" "noauth" {
+  location = google_cloud_run_v2_service.default.location
+  name     = google_cloud_run_v2_service.default.name
   project  = local.project_id
-  service  = google_cloud_run_service.default.name
-
-  policy_data = data.google_iam_policy.noauth.policy_data
+  role     = "roles/run.invoker"
+  member   = "allUsers"
 }
 
 
-# compute global address as a target for an A record
-resource "google_compute_global_address" "cloud_run_lb_address" {
-  project = local.project_id
-  name    = "${local.service_name}-cloudrun-lb-address"
-}
-
-
-# SSL cert
-resource "google_compute_managed_ssl_certificate" "default" {
-  provider = google-beta
-  project  = local.project_id
-
-  name = "${local.service_name}-cert"
-  managed {
-    domains = ["${local.service_name}.${var.domain_name}"]
-  }
-}
-
-
-# forwarding rule -> target http proxy -> url map -> NEG -> backend service -> cloud-run.
-# forwarding rule
-resource "google_compute_global_forwarding_rule" "default" {
-  name                  = "${local.service_name}-forwarding-rule"
-  project               = local.project_id
-  provider              = google-beta
-  ip_protocol           = "TCP"
-  load_balancing_scheme = "EXTERNAL"
-  port_range            = "443"
-  target                = google_compute_target_https_proxy.default.id
-  ip_address            = google_compute_global_address.cloud_run_lb_address.id
-}
-
-# url map
-resource "google_compute_url_map" "default" {
-  name            = "${local.service_name}-url-map"
-  project         = local.project_id
-  provider        = google-beta
-  default_service = google_compute_backend_service.default.id
-}
-
-# https proxy
-resource "google_compute_target_https_proxy" "default" {
-  name    = "${local.service_name}-https-proxy"
-  project = local.project_id
-
-  url_map = google_compute_url_map.default.id
-  ssl_certificates = [
-    google_compute_managed_ssl_certificate.default.id
-  ]
-}
-
-
-resource "google_compute_region_network_endpoint_group" "cloudrun_neg" {
-  provider              = google-beta
-  project               = local.project_id
-  name                  = "${local.service_name}-neg"
-  network_endpoint_type = "SERVERLESS"
-  region                = local.location
-  cloud_run {
-    service = google_cloud_run_service.default.name
-  }
-}
-
-resource "google_compute_backend_service" "default" {
-  name    = "${local.service_name}-backend"
-  project = local.project_id
-
-  protocol    = "HTTP"
-  port_name   = "http"
-  timeout_sec = 30
-
-  backend {
-    group = google_compute_region_network_endpoint_group.cloudrun_neg.id
-  }
-}
-
-
-#http redirect to https
-resource "google_compute_url_map" "https_redirect" {
-  name    = "${local.service_name}-https-redirect"
-  project = local.project_id
-  default_url_redirect {
-    https_redirect         = true
-    redirect_response_code = "MOVED_PERMANENTLY_DEFAULT"
-    strip_query            = false
-  }
-}
-
-resource "google_compute_target_http_proxy" "https_redirect" {
-  name    = "${local.service_name}-http-proxy-redirect"
-  project = local.project_id
-  url_map = google_compute_url_map.https_redirect.id
-}
-
-resource "google_compute_global_forwarding_rule" "https_redirect" {
-  name       = "${local.service_name}-lb-http-redirect"
-  project    = local.project_id
-  target     = google_compute_target_http_proxy.https_redirect.id
-  port_range = "80"
-  ip_address = google_compute_global_address.cloud_run_lb_address.address
-}
